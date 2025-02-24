@@ -1,0 +1,198 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Network Playground</title>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/d3/7.8.5/d3.min.js"></script>
+    <style>
+        .node { stroke: #fff; stroke-width: 1.5px; }
+        .link { stroke: #999; stroke-opacity: 0.6; cursor: pointer; }
+        .link:hover { stroke: red; stroke-width: 2px; }
+        .temp-link { stroke: #ff0000; stroke-opacity: 0.3; stroke-dasharray: 5,5; }
+        #controls { position: fixed; left: 10px; top: 10px; background: white; padding: 10px; }
+        #roll { position: fixed; left: 10px; bottom: 10px; background: white; padding: 10px; }
+        button { margin: 5px; padding: 5px; }
+        input { margin: 5px; }
+    </style>
+</head>
+<body>
+    <div id="controls">
+        <div>
+            Nodes (n): <input type="number" id="nNodes" value="10" min="2" max="50">
+            Probability (p): <input type="number" id="prob" value="0.3" min="0" max="1" step="0.1">
+            Generation Speed: <input type="number" id="speed" value="200" min="0" max="1000">
+        </div>
+        <button onclick="generateRandomNetwork()">Generate Random Network</button>
+        <button onclick="addNode()">Add Node</button>
+        <button onclick="deleteSelectedNode()">Delete Selected Node</button>
+        <button onclick="toggleLinkMode()">Toggle Link Mode</button>
+    </div>
+    <div id="roll">
+        <p id="roll-text"></p>
+    </div>
+    <svg id="network"></svg>
+
+    <script>
+        let width = window.innerWidth;
+        let height = window.innerHeight;
+        let linkMode = false;
+        let selectedNode = null;
+        let isGenerating = false;
+
+        const svg = d3.select("#network")
+            .attr("width", width)
+            .attr("height", height);
+
+        const g = svg.append("g");
+
+        const zoom = d3.zoom()
+            .scaleExtent([0.1, 4])
+            .on("zoom", (event) => g.attr("transform", event.transform));
+
+        svg.call(zoom);
+
+        let simulation = d3.forceSimulation()
+            .force("link", d3.forceLink().id(d => d.id))
+            .force("charge", d3.forceManyBody().strength(-300))
+            .force("center", d3.forceCenter(width / 2, height / 2))
+            .force("x", d3.forceX(width / 2).strength(0.1))
+            .force("y", d3.forceY(height / 2).strength(0.1));
+
+        let graph = {
+            nodes: [],
+            links: []
+        };
+
+        function updateGraph() {
+            const link = g.selectAll(".link")
+                .data(graph.links)
+                .join("line")
+                .attr("class", "link")
+                .on("click", deleteLink);
+
+            const node = g.selectAll(".node")
+                .data(graph.nodes)
+                .join("circle")
+                .attr("class", "node")
+                .attr("r", 10)
+                .attr("fill", d => d === selectedNode ? "red" : "#1f77b4")
+                .call(d3.drag()
+                    .on("start", dragstarted)
+                    .on("drag", dragged)
+                    .on("end", dragended))
+                .on("click", nodeClicked);
+
+            simulation.nodes(graph.nodes)
+                .force("link").links(graph.links);
+
+            simulation.on("tick", () => {
+                link
+                    .attr("x1", d => d.source.x)
+                    .attr("y1", d => d.source.y)
+                    .attr("x2", d => d.target.x)
+                    .attr("y2", d => d.target.y);
+
+                node
+                    .attr("cx", d => d.x)
+                    .attr("cy", d => d.y);
+            });
+
+            simulation.alpha(1).restart();
+        }
+
+        async function generateRandomNetwork() {
+            if (isGenerating) isGenerating = false;
+            isGenerating = true;
+            
+            const n = parseInt(document.getElementById("nNodes").value);
+            const p = parseFloat(document.getElementById("prob").value);
+            const speed = parseFloat(document.getElementById("speed").value);
+            
+            graph.nodes = Array.from({length: n}, (_, i) => ({id: i}));
+            graph.links = [];
+            updateGraph();
+
+            for (let i = 0; i < n; i++) {
+                for (let j = i + 1; j < n; j++) {
+                    const tempLink = g.append("line")
+                        .attr("class", "temp-link")
+                        .attr("x1", graph.nodes[i].x)
+                        .attr("y1", graph.nodes[i].y)
+                        .attr("x2", graph.nodes[j].x)
+                        .attr("y2", graph.nodes[j].y);
+
+                    await new Promise(resolve => setTimeout(resolve, speed));
+
+                    let roll = Math.random()
+                    document.getElementById('roll-text').textContent = "roll=" + roll.toFixed(2) +  ", p=" + p
+                    if (roll < p) {
+                        graph.links.push({source: i, target: j});
+                        updateGraph();
+                    }
+                    
+                    tempLink.remove();
+                }
+            }
+            
+            isGenerating = false;
+        }
+
+        function deleteLink(event, d) {
+            event.stopPropagation();
+            graph.links = graph.links.filter(l => l !== d);
+            updateGraph();
+        }
+
+        function dragstarted(event, d) {
+            if (!event.active) simulation.alphaTarget(0.3).restart();
+            d.fx = d.x;
+            d.fy = d.y;
+        }
+
+        function dragged(event, d) {
+            d.fx = event.x;
+            d.fy = event.y;
+        }
+
+        function dragended(event, d) {
+            if (!event.active) simulation.alphaTarget(0);
+            d.fx = null;
+            d.fy = null;
+        }
+
+        function nodeClicked(event, d) {
+            if (linkMode && selectedNode && selectedNode !== d) {
+                graph.links.push({source: selectedNode.id, target: d.id});
+                selectedNode = null;
+                updateGraph();
+            } else {
+                selectedNode = selectedNode === d ? null : d;
+                updateGraph();
+            }
+        }
+
+        function addNode() {
+            const newId = graph.nodes.length;
+            graph.nodes.push({id: newId});
+            updateGraph();
+        }
+
+        function deleteSelectedNode() {
+            if (selectedNode) {
+                graph.nodes = graph.nodes.filter(n => n !== selectedNode);
+                graph.links = graph.links.filter(l => 
+                    l.source !== selectedNode && l.target !== selectedNode);
+                selectedNode = null;
+                updateGraph();
+            }
+        }
+
+        function toggleLinkMode() {
+            linkMode = !linkMode;
+            selectedNode = null;
+            updateGraph();
+        }
+
+        generateRandomNetwork();
+    </script>
+</body>
+</html>
